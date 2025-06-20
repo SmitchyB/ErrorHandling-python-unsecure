@@ -1,18 +1,18 @@
 # server.py for Python Flask Vulnerable Build (Insecure Error Handling)
 
 from flask import Flask, request, jsonify, Response
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import sys
 import traceback
 
 app = Flask(__name__)
 
-
-# In a real application, you would specify allowed origins for security.
+# Global CORS configuration
 CORS(app)
 
 # --- THIS IS THE VULNERABLE ENDPOINT ---
 @app.route('/api/error/trigger', methods=['POST'])
+@cross_origin()
 def trigger_error():
     print('--- RECEIVED REQUEST TO TRIGGER ERROR ---')
     data = request.get_json(silent=True)
@@ -22,18 +22,23 @@ def trigger_error():
     print('--- EXPECT TO SEE A DETAILED STACK TRACE IN BROWSER/CLIENT RESPONSE ---')
 
     # INTENTIONAL VULNERABILITY: Cause an unhandled exception
-    result = 1 / 0 
-    
+    # This will trigger the @app.errorhandler(500)
+    result = 1 / 0
+
+    # This line will not be reached
     return jsonify({"message": "This should not be reached."}), 200
 
 
-# --- VULNERABILITY: Simple Custom Error Handler to return consistent HTML/Text with stack trace ---
+# --- VULNERABILITY: Custom Error Handler to return consistent HTML/Text with stack trace ---
+# This handler explicitly formats and exposes the stack trace to the client.
 @app.errorhandler(500)
-def handle_generic_500(e):
-    error_trace = traceback.format_exc() 
+def handle_insecure_500(e):
+    # Capture the full traceback
+    error_trace = traceback.format_exc()
     print(f"Internal Server Error (logged internally by handler, then exposed): {e}", file=sys.stderr)
     print("--- EXPOSING STACK TRACE TO CLIENT ---", file=sys.stderr)
-    
+
+    # Construct an HTML response that directly includes the stack trace
     response_body = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,11 +49,13 @@ def handle_generic_500(e):
 <pre>Internal Server Error: {e}<br>{error_trace}</pre>
 </body>
 </html>"""
-    
-    # Create the response. Flask-CORS, configured globally above, will now add the
-    # Access-Control-Allow-Origin: * header automatically.
+
+    # Create the response with the insecure details and a 500 status
     response = Response(response_body, mimetype="text/html", status=500)
-    
+
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+
     return response
 
 
@@ -56,4 +63,4 @@ def handle_generic_500(e):
 if __name__ == '__main__':
     print("Python Flask Unsecure Backend (Error Handling) listening on http://127.0.0.1:5002")
     print("Ready to demonstrate insecure error handling.")
-    app.run(debug=True, port=5002) # debug=True for development, turn off in production!
+    app.run(debug=True, port=5002)
